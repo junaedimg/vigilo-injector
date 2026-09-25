@@ -1,0 +1,15 @@
+# rahasia / lokal
+.env
+session.json
+
+# data kerja (berisi data task & progress)
+tasks.csv
+tasks.xlsx
+progress.csv
+recon_master.html
+log-template/
+
+# runtime
+chrome-profile/
+__pycache__/
+*.pyc
