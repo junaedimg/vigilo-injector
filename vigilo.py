@@ -1,12 +1,10 @@
 import argparse
-import collections
 import csv
 import html
 import io
 import json
 import os
 import re
-import sqlite3
 import sys
 import time
 from datetime import datetime, timedelta
@@ -27,7 +25,6 @@ THEME = os.getenv("VIGILO_THEME", "skyblue")
 SESSION_FILE = ROOT / os.getenv("VIGILO_SESSION_FILE", "session.json")
 KEEPALIVE_SECONDS = int(os.getenv("VIGILO_KEEPALIVE_SECONDS", "240"))
 TASKS_FILE = Path(os.getenv("VIGILO_TASKS_FILE", str(ROOT / "tasks.csv")))
-DEFAULT_CLIENT = os.getenv("VIGILO_CLIENT", "BKNS")
 DEFAULT_DEVELOPER = os.getenv("VIGILO_DEVELOPER", "0000000021")
 
 EXPIRED_MARKERS = ("session has expired", "press refresh")
@@ -400,55 +397,6 @@ def cmd_template(args, session=None):
             csv.writer(buf, delimiter=CSV_DELIMITER).writerow(row)
             fh.write("# " + buf.getvalue())
     print(f"[template] dibuat: {TASKS_FILE}")
-
-
-def cmd_xlsx(args):
-    try:
-        from openpyxl import Workbook
-        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-        from openpyxl.utils import get_column_letter
-    except ImportError:
-        raise SystemExit("openpyxl belum terpasang. Jalankan: pip install openpyxl")
-
-    rows = read_tasks(args.file)
-    out = Path(args.output) if args.output else args.file.with_suffix(".xlsx")
-
-    thin = Side(style="thin", color="808080")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    header_fill = PatternFill("solid", fgColor="DCE6F1")
-    header_font = Font(bold=True)
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "tasks"
-    ws.append(CSV_HEADER)
-    for cell in ws[1]:
-        cell.border = border
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-
-    for row in rows:
-        ws.append([row.get(col, "") for col in CSV_HEADER])
-
-    for r in range(2, ws.max_row + 1):
-        for c in range(1, len(CSV_HEADER) + 1):
-            cell = ws.cell(row=r, column=c)
-            cell.border = border
-            cell.alignment = Alignment(vertical="top", wrap_text=True)
-
-    widths = [10, 10, 42, 12, 14, 26, 14]
-    for i, w in enumerate(widths, start=1):
-        ws.column_dimensions[get_column_letter(i)].width = w
-    ws.freeze_panes = "A2"
-
-    try:
-        wb.save(out)
-    except PermissionError:
-        raise SystemExit(
-            f"Tidak bisa menulis {out.name}: file sedang dibuka program lain."
-        )
-    print(f"[xlsx] dibuat: {out} ({len(rows)} baris)")
 
 
 def _fmt_table(headers, rows, title=None):
@@ -967,261 +915,6 @@ def cmd_progress(args):
     print()
 
 
-SVN_MODULE = {
-    "kebun": "KEBUN",
-    "sdm": "SDM",
-    "log": "LOG",
-    "keu": "KEU",
-    "pabrik": "MILL",
-    "vhc": "VHC",
-    "bgt": "BUDG",
-    "budget": "BUDG",
-    "pmn": "PEM",
-    "rekal": "KEBUN",
-    "bibit": "KEBUN",
-    "setup": "ADMS",
-    "master": "ADMS",
-    "tool": "ADMS",
-    "slave": "ADMS",
-    "lib": "ADMS",
-    "cron": "ADMS",
-}
-NON_SOURCE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".css", ".ico", ".sql", ".ini", ".dic", ".txt")
-
-
-def _svn_module(files):
-    base = files[0].split("/")[-1]
-    seg = files[0].split("/")[0]
-    match = re.match(r"([a-zA-Z0-9]+?)_", base)
-    key = seg if seg in SVN_MODULE else (match.group(1) if match and match.group(1) in SVN_MODULE else "ADMS")
-    return SVN_MODULE.get(key, "ADMS")
-
-
-def _svn_estimate_tipe(files):
-    src = [p for p in files if not p.lower().endswith(NON_SOURCE_EXT)]
-    if not src:
-        src = files
-    n = len(src)
-    has_js = any(p.lower().endswith(".js") for p in src)
-    has_slave = any("_slave_" in p for p in src)
-    if n >= 4:
-        return "super hard"
-    if n >= 3:
-        return "hard"
-    if n == 2 or has_js or has_slave:
-        return "medium"
-    return "easy"
-
-
-MENU_MAP_FILE = ROOT / "menu_map.json"
-_MENU_MAP = None
-FIELD_MAP = {
-    "namakaryawan": "nama karyawan",
-    "namapegawai": "nama pegawai",
-    "namapekerja": "nama pekerja",
-    "namasupplier": "nama supplier",
-    "namabarang": "nama barang",
-    "namaorganisasi": "nama unit/organisasi",
-    "nama": "nama",
-    "nik": "NIK karyawan",
-    "kodeblok": "kode blok",
-    "kodebarang": "kode barang",
-    "kodeorganisasi": "kode unit",
-    "gaji": "gaji",
-    "upah": "upah",
-    "absen": "absensi",
-    "premi": "premi",
-    "panen": "panen",
-    "stok": "stok",
-    "harga": "harga",
-    "cuti": "cuti",
-    "lembur": "lembur",
-    "potongan": "potongan",
-    "bpjs": "BPJS",
-    "pajak": "pajak",
-    "thr": "THR",
-    "divisi": "divisi",
-    "blok": "blok",
-    "periode": "periode",
-    "tanggal": "tanggal",
-    "jumlah": "jumlah",
-    "total": "total",
-    "luas": "luas",
-    "jjg": "jumlah janjang",
-    "kg": "berat (kg)",
-    "tbs": "TBS",
-}
-
-
-def _load_menu_map():
-    global _MENU_MAP
-    if _MENU_MAP is None:
-        _MENU_MAP = {}
-        if MENU_MAP_FILE.exists():
-            try:
-                _MENU_MAP = json.loads(MENU_MAP_FILE.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                _MENU_MAP = {}
-    return _MENU_MAP
-
-
-def _svn_feature(files):
-    import difflib
-
-    menu = _load_menu_map()
-    if not menu:
-        return None
-    actions = list(menu.keys())
-    best = (None, 0.0)
-    for path in files:
-        base = path.split("/")[-1].rsplit(".", 1)[0]
-        candidates = {
-            base,
-            re.sub(r"_slave_?", "", base),
-            re.sub(r"^slave_", "", base),
-            re.sub(r"_\d+", "", base),
-            re.sub(r"(_v\d+|_x|_excel|_pdf|_popup|_list|_re|_backup|lama)$", "", base, flags=re.I),
-        }
-        for cand in candidates:
-            if cand in menu:
-                return menu[cand]
-            close = difflib.get_close_matches(cand, actions, n=1, cutoff=0.78)
-            if close:
-                score = difflib.SequenceMatcher(None, cand, close[0]).ratio()
-                if score > best[1]:
-                    best = (menu[close[0]], score)
-    return best[0]
-
-
-def _column_phrase(col):
-    col = col.strip().strip("`").lower()
-    col = re.sub(r"\s+as\s+\w+$", "", col)
-    col = col.split(".")[-1].strip()
-    for key in sorted(FIELD_MAP, key=len, reverse=True):
-        if col == key or col.endswith(key):
-            return FIELD_MAP[key]
-    return None
-
-
-def _svn_fields(files, root=None, limit=4):
-    seen = []
-    for path in files:
-        p = (Path(root) / path) if root else Path(path)
-        if not p.exists():
-            continue
-        try:
-            text = p.read_text(encoding="latin-1", errors="ignore")
-        except OSError:
-            continue
-        for select in re.findall(r"select\s+(.{3,400}?)\s+from\s", text, re.I | re.S):
-            for col in select.split(","):
-                phrase = _column_phrase(col)
-                if phrase and phrase not in seen and phrase not in ("nama", "jumlah", "total", "tanggal"):
-                    seen.append(phrase)
-                if len(seen) >= limit:
-                    return seen
-        if seen:
-            break
-    return seen
-
-
-def _humanize(base):
-    b = re.sub(r"(_v\d+|_excel|_pdf|_popup|_list|_backup|_lama|_x)$", "", base, flags=re.I)
-    b = re.sub(r"^(kebun|sdm|log|keu|pabrik|vhc|bgt|budget|pmn|rekal|bibit|setup|master|tool|lib|cron|slave)_", "", b, flags=re.I)
-    b = re.sub(r"_slave_?", " ", b, flags=re.I)
-    b = b.replace("_", " ")
-    b = re.sub(r"([a-z])([A-Z])", r"\1 \2", b)
-    b = re.sub(r"\s+", " ", b).strip()
-    return b.title() if b else base
-
-
-def _svn_describe(files, root=None):
-    module = _svn_module(files)
-    source = [p for p in files if not p.lower().endswith(NON_SOURCE_EXT)]
-    multi = len(source) > 1
-    if not source:
-        names = ", ".join(p.split("/")[-1] for p in files)
-        return f"Pembaruan aset: {names}"
-    feature = _svn_feature(source)
-    verb = "Pengembangan" if multi else "Perbaikan"
-    if feature:
-        head = f"{verb} {feature}"
-    else:
-        base = source[0].split("/")[-1].rsplit(".", 1)[0]
-        head = f"{verb} {module}: {_humanize(base)}"
-    fields = _svn_fields(source, root=root)
-    if fields:
-        head += " — menampilkan " + ", ".join(fields)
-    return head
-
-
-def cmd_svn_import(args):
-    wc = Path(args.svn_path)
-    db = wc / ".svn" / "wc.db"
-    if not db.exists():
-        raise SystemExit(f"Tidak menemukan working copy SVN di {db}")
-    con = sqlite3.connect(f"file:{db.as_posix()}?mode=ro&immutable=1", uri=True)
-    rows = con.execute(
-        "select changed_revision, changed_date, local_relpath, translated_size "
-        "from NODES where op_depth=0 and kind='file' and changed_author=? "
-        "order by changed_revision",
-        (args.author,),
-    ).fetchall()
-    con.close()
-    if not rows:
-        raise SystemExit(f"Tidak ada commit dengan author={args.author!r}")
-
-    groups = collections.OrderedDict()
-    for rev, cd, path, size in rows:
-        groups.setdefault(rev, {"date": cd, "files": []})
-        groups[rev]["files"].append(path)
-
-    today = datetime.now().strftime("%d-%m-%Y")
-    data = []
-    dist = collections.Counter()
-    for rev in sorted(groups):
-        files = sorted(groups[rev]["files"])
-        tipe = _svn_estimate_tipe(files)
-        dist[tipe] += 1
-        data.append(
-            [
-                args.client,
-                _svn_module(files),
-                _svn_describe(files, root=wc),
-                tipe,
-                args.developer,
-                args.qc,
-                args.deadline or today,
-            ]
-        )
-
-    if args.output.exists() and not args.force:
-        raise SystemExit(f"{args.output.name} sudah ada. Pakai --force untuk menimpa.")
-
-    header_comment = [
-        "# Digenerate dari riwayat SVN (per commit).",
-        f"# Repo working copy : {wc}",
-        f"# Author            : {args.author}",
-        f"# Jumlah commit     : {len(data)}",
-        f"# Kolom (pemisah '{CSV_DELIMITER}'): {CSV_DELIMITER.join(CSV_HEADER)}",
-        "#",
-    ]
-    try:
-        fh = args.output.open("w", encoding="utf-8", newline="")
-    except PermissionError:
-        raise SystemExit(f"Tidak bisa menulis {args.output.name}: file sedang dibuka program lain.")
-    with fh:
-        fh.write("\n".join(header_comment) + "\n")
-        writer = csv.writer(fh, delimiter=CSV_DELIMITER)
-        writer.writerow(CSV_HEADER)
-        writer.writerows(data)
-
-    print(paint(f"  [svn-import] {len(data)} task ditulis ke {args.output}", C.BGREEN, C.BOLD))
-    for name, count in dist.most_common():
-        print("  " + paint(f"{name:<10} {count}", C.BCYAN))
-    print(paint("  Review dengan: python vigilo.py add", C.GREY))
-
-
 def keepalive(session):
     session = ensure_session(session)
     print(f"[keepalive] tiap {KEEPALIVE_SECONDS}s, Ctrl+C untuk stop")
@@ -1249,25 +942,11 @@ def main():
     p_tpl = sub.add_parser("template", help="buat file tasks.csv")
     p_tpl.add_argument("--force", action="store_true", help="timpa jika sudah ada")
 
-    p_xlsx = sub.add_parser("xlsx", help="buat versi Excel (.xlsx) berborder dari CSV")
-    p_xlsx.add_argument("--file", type=Path, default=TASKS_FILE, help="file CSV sumber")
-    p_xlsx.add_argument("--output", type=Path, default=None, help="path .xlsx keluaran")
-
     p_add = sub.add_parser("add", help="loop input task dari tasks.csv (insert saja)")
     p_add.add_argument("--submit", action="store_true", help="benar-benar kirim (default dry-run)")
     p_add.add_argument("--limit", type=int, default=0, help="batasi jumlah baris")
     p_add.add_argument("--delay", type=float, default=0.5, help="jeda antar submit (detik)")
     p_add.add_argument("--file", type=Path, default=TASKS_FILE, help="path file task")
-
-    p_svn = sub.add_parser("svn-import", help="generate tasks.csv dari riwayat commit SVN (per commit)")
-    p_svn.add_argument("--svn-path", type=Path, default=Path(r"C:\laragon\www\local-bkns"), help="path working copy SVN")
-    p_svn.add_argument("--author", default="junaidi", help="filter author commit")
-    p_svn.add_argument("--output", type=Path, default=TASKS_FILE, help="file CSV keluaran")
-    p_svn.add_argument("--force", action="store_true", help="timpa jika sudah ada")
-    p_svn.add_argument("--client", default=DEFAULT_CLIENT, help="kode client")
-    p_svn.add_argument("--developer", default=DEFAULT_DEVELOPER, help="id developer")
-    p_svn.add_argument("--qc", default="0000000016,0000000002", help="id qc (pisah koma)")
-    p_svn.add_argument("--deadline", default="", help="deadline dd-mm-yyyy (kosong = hari ini)")
 
     p_post = sub.add_parser("post", help="posting task yang belum diposting (permanen)")
     p_post.add_argument("--submit", action="store_true", help="benar-benar posting (default dry-run)")
@@ -1298,13 +977,9 @@ def main():
         cmd_options(None)
     elif args.cmd == "template":
         cmd_template(args)
-    elif args.cmd == "xlsx":
-        cmd_xlsx(args)
     elif args.cmd == "add":
         TASKS_FILE = args.file
         cmd_add(args)
-    elif args.cmd == "svn-import":
-        cmd_svn_import(args)
     elif args.cmd == "post":
         cmd_post(args)
     elif args.cmd == "progress":

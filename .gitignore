@@ -4,7 +4,6 @@ session.json
 
 # data kerja (berisi data task & progress)
 tasks.csv
-tasks.xlsx
 progress.csv
 recon_master.html
 log-template/

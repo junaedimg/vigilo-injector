@@ -23,7 +23,6 @@ VIGILO_LANGUAGE=ID
 VIGILO_THEME=skyblue
 VIGILO_SESSION_FILE=session.json
 VIGILO_KEEPALIVE_SECONDS=240
-VIGILO_CLIENT=BKNS
 VIGILO_DEVELOPER=0000000021
 ```
 
@@ -49,8 +48,6 @@ dan hanya login ulang bila sesi sudah expired.
 |---|---|
 | `python vigilo.py options` | Tampilkan ID valid: client, modul, tipe, developer, qc |
 | `python vigilo.py template [--force]` | Buat `tasks.csv` dari contoh asli server |
-| `python vigilo.py svn-import` | Generate `tasks.csv` dari riwayat commit SVN (per commit) |
-| `python vigilo.py xlsx [--file CSV] [--output X]` | Buat versi Excel `tasks.xlsx` berborder dari CSV |
 | `python vigilo.py add` | Validasi + **dry-run** (tidak mengirim) |
 | `python vigilo.py add --submit` | Kirim semua baris (`method=insert`) |
 | `python vigilo.py post` | Tampilkan task belum diposting (dry-run) |
@@ -141,32 +138,6 @@ Validasi: `idtask` harus task `sudah diposting` milik Anda, `progress` 0–100, 
 Setelah `--submit`, script memverifikasi ulang kolom Progress PIC tiap ID — mencakup status
 `Sudah Diposting`, `PIC Sudah Selesai`, dan `DONE` (karena progress 100% otomatis memindahkan status).
 
-## Impor dari SVN
-
-Membuat `tasks.csv` dari riwayat commit SVN (per commit) secara read-only dari `.svn/wc.db`:
-
-```bash
-python vigilo.py svn-import --force
-python vigilo.py add            # review dry-run
-python vigilo.py add --submit   # kirim
-```
-
-Opsi `svn-import`:
-
-| Opsi | Default | Keterangan |
-|---|---|---|
-| `--svn-path` | `C:\laragon\www\local-bkns` | Path working copy SVN |
-| `--author` | `junaidi` | Filter author commit |
-| `--output` | `tasks.csv` | File keluaran |
-| `--force` | mati | Timpa file yang ada |
-| `--client` | `VIGILO_CLIENT` | Kode client |
-| `--developer` | `VIGILO_DEVELOPER` | ID developer |
-| `--qc` | `0000000016,0000000002` | ID QC (pisah koma) |
-| `--deadline` | hari ini | `dd-mm-yyyy` |
-
-Deskripsi task diturunkan dari nama file commit (commit message tidak tersimpan lokal);
-`tipe` diestimasi dari jumlah & jenis file (`easy`/`medium`/`hard`/`super hard`).
-
 ## Format `tasks.csv`
 
 Header wajib di baris pertama data, diikuti baris task. Pemisah kolom memakai **titik-koma `;`**:
@@ -195,17 +166,6 @@ Aturan:
 - Baris diawali `#` dan baris kosong diabaikan.
 - `deadline` otomatis: easy 1 hari, medium 3, hard 7, super hard 10 (dari hari ini).
 - Resolver menerima ID; nama masih ditoleransi bila diisi.
-
-### Border visual (Excel)
-
-CSV tidak mendukung border (format teks). Untuk tampilan berborder, generate file Excel dari CSV:
-
-```bash
-python vigilo.py xlsx
-```
-
-Hasil `tasks.xlsx` (header tebal + border tiap sel, kolom auto-lebar, baris header dibekukan).
-Mengubah `tasks.csv` tidak memengaruhi `tasks.xlsx`; jalankan ulang perintah ini setelah CSV diperbarui.
 
 ## Catatan
 
